@@ -5,41 +5,60 @@ import torchvision.models as models
 from torchvision import transforms
 from PIL import Image
 
+# --------------------------------------------------
 
-# -----------------------------
-# Device
-# -----------------------------
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Page configuration
 
+# --------------------------------------------------
 
-# -----------------------------
-# Class names
-# -----------------------------
-class_names = ["cats", "dogs", "panda"]
+st.set_page_config(
+page_title="Animal Classifier",
+page_icon="🐾",
+layout="centered"
+)
 
+# --------------------------------------------------
 
-# -----------------------------
+# Configuration
+
+# --------------------------------------------------
+
+DEVICE = torch.device(
+"cuda" if torch.cuda.is_available() else "cpu"
+)
+
+CLASS_NAMES = ["cats", "dogs", "panda"]
+
+MODEL_PATH = "best_resnet18.pth"
+
+# --------------------------------------------------
+
 # Image preprocessing
-# -----------------------------
+
+# Must match the preprocessing used during training
+
+# --------------------------------------------------
+
 transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225]
-    )
+transforms.Resize((224, 224)),
+transforms.ToTensor(),
+transforms.Normalize(
+mean=[0.485, 0.456, 0.406],
+std=[0.229, 0.224, 0.225]
+)
 ])
 
+# --------------------------------------------------
 
-# -----------------------------
-# Load model
-# -----------------------------
+# Load trained model
+
+# --------------------------------------------------
+
 @st.cache_resource
 def load_model():
-
-    model = models.resnet18(
-        weights=None
-    )
+    # Recreate the SAME architecture used during training.
+    # No pretrained weights are downloaded here.
+    model = models.resnet18(weights=None)
 
     model.fc = nn.Sequential(
         nn.Linear(512, 256),
@@ -48,14 +67,14 @@ def load_model():
         nn.Linear(256, 3)
     )
 
-    model.load_state_dict(
-        torch.load(
-            "best_resnet18.pth",
-            map_location=device
-        )
+    # Load the trained weights
+    state_dict = torch.load(
+        MODEL_PATH,
+        map_location=DEVICE
     )
 
-    model.to(device)
+    model.load_state_dict(state_dict)
+    model.to(DEVICE)
     model.eval()
 
     return model
@@ -63,50 +82,63 @@ def load_model():
 
 model = load_model()
 
+# --------------------------------------------------
 
-# -----------------------------
-# Streamlit UI
-# -----------------------------
-st.title("🐱🐶🐼 Animal Image Classifier")
+# UI
+
+# --------------------------------------------------
+
+st.title("🐾 Animal Image Classifier")
 
 st.write(
-    "Upload an image and the trained ResNet18 model "
-    "will classify it as a cat, dog, or panda."
+"Upload an image and the trained ResNet18 model "
+"will classify it as a cat, dog, or panda."
 )
 
+st.caption(
+"Transfer Learning • ResNet18 • PyTorch"
+)
+
+# --------------------------------------------------
+
+# Upload image
+
+# --------------------------------------------------
 
 uploaded_file = st.file_uploader(
-    "Upload an image",
-    type=["jpg", "jpeg", "png"]
+"Upload an image",
+type=["jpg", "jpeg", "png"]
 )
 
+# --------------------------------------------------
+
+# Prediction
+
+# --------------------------------------------------
 
 if uploaded_file is not None:
-
     image = Image.open(uploaded_file).convert("RGB")
 
     st.image(
         image,
         caption="Uploaded Image",
-        width=400
+        width=500
     )
 
-
-    # -------------------------
-    # Preprocess
-    # -------------------------
+    # Convert image to model input
     image_tensor = transform(image)
 
+    # Add batch dimension
     image_tensor = image_tensor.unsqueeze(0)
 
-    image_tensor = image_tensor.to(device)
+    # Move to same device as model
+    image_tensor = image_tensor.to(DEVICE)
 
+    # ----------------------------------------------
+    # Inference
+    # ----------------------------------------------
 
-    # -------------------------
-    # Prediction
-    # -------------------------
     with torch.no_grad():
-
         output = model(image_tensor)
 
         probabilities = torch.softmax(
@@ -114,42 +146,91 @@ if uploaded_file is not None:
             dim=1
         )
 
-        predicted_class = torch.argmax(
+        predicted_index = torch.argmax(
             probabilities,
             dim=1
         ).item()
 
+        predicted_class = CLASS_NAMES[
+            predicted_index
+        ]
+
         confidence = probabilities[
-            0, predicted_class
+            0, predicted_index
         ].item()
 
+    # --------------------------------------------------
+    # Display prediction
+    # --------------------------------------------------
 
-    # -------------------------
-    # Display result
-    # -------------------------
-    predicted_name = class_names[predicted_class]
+    st.subheader("Prediction")
+
+    emoji = {
+        "cats": "🐱",
+        "dogs": "🐶",
+        "panda": "🐼"
+    }
 
     st.success(
-        f"Prediction: {predicted_name.upper()}"
+        f"{emoji[predicted_class]} "
+        f"{predicted_class.upper()}"
     )
 
-    st.write(
-        f"Confidence: {confidence * 100:.2f}%"
+    st.metric(
+        "Confidence",
+        f"{confidence * 100:.2f}%"
     )
 
+    # --------------------------------------------------
+    # Probability distribution
+    # --------------------------------------------------
 
-    # -------------------------
-    # Show all probabilities
-    # -------------------------
     st.subheader("Class Probabilities")
 
-    for i, class_name in enumerate(class_names):
-
-        probability = probabilities[0, i].item()
+    for i, class_name in enumerate(CLASS_NAMES):
+        probability = probabilities[
+            0, i
+        ].item()
 
         st.write(
-            f"{class_name}: "
+            f"**{class_name.capitalize()}** "
             f"{probability * 100:.2f}%"
         )
 
         st.progress(probability)
+
+# --------------------------------------------------
+
+# Model information
+
+# --------------------------------------------------
+
+with st.expander("About the Model"):
+    st.write(
+        """
+        This application uses a trained ResNet18 model
+        with Transfer Learning.
+
+        The original ImageNet classification layer was
+        replaced with a custom classifier:
+
+        512 → 256 → ReLU → Dropout → 3
+
+        The convolutional layers were frozen during
+        training, and the trained classifier weights
+        were saved to best_resnet18.pth.
+
+        The saved weights are loaded when this application
+        starts. No training is performed during inference.
+        """
+    )
+
+    st.write(f"**Device:** {DEVICE}")
+    st.write("**Classes:** Cat, Dog, Panda")
+    st.write("**Test Accuracy:** 98.67%")
+
+st.divider()
+
+st.caption(
+    "Built with PyTorch and Streamlit"
+)
